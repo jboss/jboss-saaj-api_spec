@@ -31,9 +31,9 @@ package javax.xml.soap;
 import java.io.*;
 import java.util.Properties;
 
-
 class FactoryFinder {
 
+    private static final String JBOSS_SAAJ_IMPL_MODULE = "org.jboss.ws.saaj-impl";
     /**
      * Creates an instance of the specified class using the specified 
      * <code>ClassLoader</code> object.
@@ -134,6 +134,40 @@ class FactoryFinder {
                 }
             }
         } catch( Exception ex ) {
+        }
+
+        ClassLoader moduleClassLoader = null;
+        try {
+           Class<?> moduleClass = Class.forName("org.jboss.modules.Module");
+           Class<?> moduleIdentifierClass = Class.forName("org.jboss.modules.ModuleIdentifier");
+           Class<?> moduleLoaderClass = Class.forName("org.jboss.modules.ModuleLoader");
+           Object moduleLoader = moduleClass.getMethod("getBootModuleLoader").invoke(null);
+           Object moduleIdentifier = moduleIdentifierClass.getMethod("create", String.class).invoke(null, JBOSS_SAAJ_IMPL_MODULE);
+           Object module = moduleLoaderClass.getMethod("loadModule", moduleIdentifierClass).invoke(moduleLoader, moduleIdentifier);
+           moduleClassLoader = (ClassLoader)moduleClass.getMethod("getClassLoader").invoke(module);
+        } catch (ClassNotFoundException e) {
+           //ignore, JBoss Modules might not be available at all
+        } catch (Exception e) {
+           throw new SOAPException(e);
+        }
+        if (moduleClassLoader != null) {
+           try {
+              InputStream is = moduleClassLoader.getResourceAsStream(serviceId);
+          
+              if( is!=null ) {
+                  BufferedReader rd =
+                      new BufferedReader(new InputStreamReader(is, "UTF-8"));
+          
+                  String factoryClassName = rd.readLine();
+                  rd.close();
+
+                  if (factoryClassName != null &&
+                      ! "".equals(factoryClassName)) {
+                      return newInstance(factoryClassName, moduleClassLoader);
+                  }
+              }
+          } catch( Exception ex ) {
+          }
         }
 
         return null;
