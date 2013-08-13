@@ -29,6 +29,8 @@
 package javax.xml.soap;
 
 import java.io.*;
+import java.security.AccessController;
+import java.security.PrivilegedExceptionAction;
 import java.util.Properties;
 
 class FactoryFinder {
@@ -138,13 +140,23 @@ class FactoryFinder {
 
         ClassLoader moduleClassLoader = null;
         try {
-           Class<?> moduleClass = Class.forName("org.jboss.modules.Module");
-           Class<?> moduleIdentifierClass = Class.forName("org.jboss.modules.ModuleIdentifier");
-           Class<?> moduleLoaderClass = Class.forName("org.jboss.modules.ModuleLoader");
-           Object moduleLoader = moduleClass.getMethod("getBootModuleLoader").invoke(null);
-           Object moduleIdentifier = moduleIdentifierClass.getMethod("create", String.class).invoke(null, JBOSS_SAAJ_IMPL_MODULE);
-           Object module = moduleLoaderClass.getMethod("loadModule", moduleIdentifierClass).invoke(moduleLoader, moduleIdentifier);
-           moduleClassLoader = (ClassLoader)moduleClass.getMethod("getClassLoader").invoke(module);
+            final Class<?> moduleClass = Class.forName("org.jboss.modules.Module");
+            final Class<?> moduleIdentifierClass = Class.forName("org.jboss.modules.ModuleIdentifier");
+            final Class<?> moduleLoaderClass = Class.forName("org.jboss.modules.ModuleLoader");
+            Object moduleLoader = null;
+            if (System.getSecurityManager() != null) {
+                moduleLoader = AccessController.doPrivileged(new PrivilegedExceptionAction<Object>() {
+                    public Object run() throws Exception {
+                        return moduleClass.getMethod("getBootModuleLoader").invoke(null);
+
+                    }
+                });
+            } else {
+                moduleLoader = moduleClass.getMethod("getBootModuleLoader").invoke(null);
+            }
+            Object moduleIdentifier = moduleIdentifierClass.getMethod("create", String.class).invoke(null, JBOSS_SAAJ_IMPL_MODULE);
+            Object module = moduleLoaderClass.getMethod("loadModule", moduleIdentifierClass).invoke(moduleLoader, moduleIdentifier);
+            moduleClassLoader = (ClassLoader)moduleClass.getMethod("getClassLoader").invoke(module);
         } catch (ClassNotFoundException e) {
            //ignore, JBoss Modules might not be available at all
         } catch (Exception e) {
