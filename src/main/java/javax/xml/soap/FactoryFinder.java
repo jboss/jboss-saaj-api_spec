@@ -30,6 +30,8 @@ package javax.xml.soap;
 
 import java.io.*;
 import java.security.AccessController;
+import java.security.PrivilegedAction;
+import java.security.PrivilegedActionException;
 import java.security.PrivilegedExceptionAction;
 import java.util.Properties;
 
@@ -83,7 +85,7 @@ class FactoryFinder {
     {
         ClassLoader classLoader;
         try {
-            classLoader = Thread.currentThread().getContextClassLoader();
+            classLoader = getContextClassLoader();
         } catch (Exception x) {
             throw new SOAPException(x.toString(), x);
         }
@@ -143,8 +145,9 @@ class FactoryFinder {
             final Class<?> moduleClass = Class.forName("org.jboss.modules.Module");
             final Class<?> moduleIdentifierClass = Class.forName("org.jboss.modules.ModuleIdentifier");
             final Class<?> moduleLoaderClass = Class.forName("org.jboss.modules.ModuleLoader");
+            final SecurityManager sm = System.getSecurityManager();
             Object moduleLoader = null;
-            if (System.getSecurityManager() != null) {
+            if (sm != null) {
                 moduleLoader = AccessController.doPrivileged(new PrivilegedExceptionAction<Object>() {
                     public Object run() throws Exception {
                         return moduleClass.getMethod("getBootModuleLoader").invoke(null);
@@ -155,8 +158,21 @@ class FactoryFinder {
                 moduleLoader = moduleClass.getMethod("getBootModuleLoader").invoke(null);
             }
             Object moduleIdentifier = moduleIdentifierClass.getMethod("create", String.class).invoke(null, JBOSS_SAAJ_IMPL_MODULE);
-            Object module = moduleLoaderClass.getMethod("loadModule", moduleIdentifierClass).invoke(moduleLoader, moduleIdentifier);
-            moduleClassLoader = (ClassLoader)moduleClass.getMethod("getClassLoader").invoke(module);
+            final Object module = moduleLoaderClass.getMethod("loadModule", moduleIdentifierClass).invoke(moduleLoader, moduleIdentifier);
+            if (sm != null) {
+                try {
+                    moduleClassLoader = AccessController.doPrivileged(new PrivilegedExceptionAction<ClassLoader>() {
+                        @Override
+                        public ClassLoader run() throws Exception {
+                            return (ClassLoader) moduleClass.getMethod("getClassLoader").invoke(module);
+                        }
+                    });
+                } catch (PrivilegedActionException pae) {
+                    throw pae.getException();
+                }
+            } else {
+                moduleClassLoader = (ClassLoader) moduleClass.getMethod("getClassLoader").invoke(module);
+            }
         } catch (ClassNotFoundException e) {
            //ignore, JBoss Modules might not be available at all
         } catch (Exception e) {
@@ -226,5 +242,19 @@ class FactoryFinder {
         }
 
         return newInstance(fallbackClassName, classLoader);
+    }
+
+    private static ClassLoader getContextClassLoader() {
+        final SecurityManager sm = System.getSecurityManager();
+        if (sm == null) {
+            return Thread.currentThread().getContextClassLoader();
+        }
+
+        return AccessController.doPrivileged(new PrivilegedAction<ClassLoader>() {
+            @Override
+            public ClassLoader run() {
+                return Thread.currentThread().getContextClassLoader();
+            }
+        });
     }
 }
